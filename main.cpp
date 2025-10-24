@@ -450,7 +450,7 @@ void Gamepaused() {
     while (true)                        //在暂停中等待按键触发
         if (GetAsyncKeyState(keyset.keypause) & 0x8000)
             break;
-    startTime = time(NULL) - gameTime;  //调整时间，删除暂停时间
+    startTime = time(NULL)-gameTime;  //调整时间，删除暂停时间
 }
 
 //检测键盘输入任意键位
@@ -465,15 +465,23 @@ bool checkAnyKeyPressed() {
 
 //处理键盘输入
 void handleInput() {
-
+    bool isrotate;
+    bool isdown;
+    bool isleft;
+    bool isright;
+    bool isdrop;
+    bool isquit;
+    bool ispause;
+    bool modifyflag;
     //各个键位是否被按下的bool值 （0x8000是按下)
-    bool isrotate = GetAsyncKeyState(keyset.keyrotate) & 0x8000;
-    bool isdown = GetAsyncKeyState(keyset.keydown) & 0x8000;
-    bool isleft = GetAsyncKeyState(keyset.keyleft) & 0x8000;
-    bool isright = GetAsyncKeyState(keyset.keyright) & 0x8000;
-    bool isdrop = GetAsyncKeyState(keyset.keydrop) & 0x8000;
-    bool isquit = GetAsyncKeyState(keyset.keyquit) & 0x8000;
-    bool ispause = GetAsyncKeyState(keyset.keypause) & 0x8000;
+    if ( isrotate = GetAsyncKeyState(keyset.keyrotate) & 0x8000);
+    else if ( isdown = GetAsyncKeyState(keyset.keydown) & 0x8000);
+    else if ( isleft = GetAsyncKeyState(keyset.keyleft) & 0x8000);
+    else if ( isright = GetAsyncKeyState(keyset.keyright) & 0x8000);
+    else if ( isdrop = GetAsyncKeyState(keyset.keydrop) & 0x8000);
+    else if ( isquit = GetAsyncKeyState(keyset.keyquit) & 0x8000);
+    else if ( ispause = GetAsyncKeyState(keyset.keypause) & 0x8000);
+    else if ( modifyflag = checkAnyKeyPressed() & 0x8000); //检测除去功能键外的任意键按下
 
 
     // 只有在本帧按下，上一帧没按下时，才执行一次
@@ -505,6 +513,9 @@ void handleInput() {
     {
         Gamepaused();
     }   // 暂停游戏
+    else if (modifykeyflag && modifyflag) {
+        modifykey();
+    }
 
 // 更新上一帧的状态
     KeyRotate = isrotate;
@@ -514,10 +525,16 @@ void handleInput() {
     KeyDrop = isdrop;
     KeyQuit = isquit;
     KeyPause = ispause;
+    modifykeyflag = false;
 }
 
 //键位修改
 bool modifykey(char *key, char mfkey) {
+
+    while (GetAsyncKeyState(key);  //等待松开暂停键
+    while (true)                        //在暂停中等待按键触发
+        if (GetAsyncKeyState(keyset.keypause) & 0x8000)
+            break;
     if (mfkey == keyset.keyrotate || mfkey == keyset.keydown ||
         mfkey == keyset.keyleft || mfkey == keyset.keyright ||
         mfkey == keyset.keydrop || mfkey == keyset.keypause ||
@@ -526,3 +543,5 @@ bool modifykey(char *key, char mfkey) {
     *key = mfkey;   //修改键位
     return true;
 }
+
+
