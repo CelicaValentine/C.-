@@ -1,9 +1,11 @@
+
 #define _CRT_SECURE_NO_WARNINGS  // 解决sprintf安全警告
 #include <graphics.h>
 #include <conio.h>
 #include <time.h>
 #include <windows.h>
 #include <iostream>
+
 using namespace std;
 
 // 定义常量（方块大小、游戏区域尺寸等）
@@ -17,7 +19,7 @@ using namespace std;
 // 定义方块颜色（对应不同形状）
 // 例子:将文本颜色设置为蓝色（索引3）,SetTextColor(hdc, blockColor[3]);
 COLORREF blockColor[] = {
-    RGB(0, 0, 0),      // 0-空白（黑色）
+    RGB(0, 0, 0),      // 0-黑色
     RGB(255, 0, 0),    // 1-红色
     RGB(0, 255, 0),    // 2-绿色
     RGB(0, 0, 255),    // 3-蓝色
@@ -25,12 +27,32 @@ COLORREF blockColor[] = {
     RGB(255, 165, 0),  // 5-橙色
     RGB(128, 0, 128),  // 6-紫色
     RGB(0, 255, 255),   // 7-青色
-	RGB(225,192,203),   // 8-粉色
-	RGB(255,255,255)   // 9-白色
+    RGB(255,255,255),   // 8-白色
+    RGB(240,240,240),    //9-浅灰色背景
+    RGB(160, 82, 45)    //10-牛皮色背景
 };
 
 
 //************游戏的全局变量****************//
+typedef struct KeyConfig {
+    char keyrotate; // 旋转
+    char keyleft;   // 左移
+    char keyright;  // 右移
+    char keydown;   // 下移
+    char keydrop;   // 快速落地
+    char keyquit;   // 退出游戏
+    char keypause;  // 暂停游戏
+}Key; Key keyset;
+//记录7个按键的状态，防止按键连发
+bool KeyRotate = false;
+bool KeyLeft = false;
+bool KeyRight = false;
+bool KeyDown = false;
+bool KeyDrop = false;
+bool KeyQuit = false;
+bool KeyPause = false;
+
+
 // 定义7种俄罗斯方块形状（4x4矩阵）
 int blockShape[7][4][4][4] = {
     // I型：4种旋转状态（横/竖）
@@ -91,8 +113,9 @@ int currShape, currRot, currX, currY;
 int nextShape;
 // 游戏数据
 int score = 0;
-int gameTime = 0;
+int gameTime = 0;   //游戏游玩时长
 time_t startTime;   // 游戏开始时间
+bool modifykeyflag = false; //键位修改标识
 
 
 // 函数声明
@@ -109,88 +132,92 @@ void eliminateLines();  //消除满行
 void updateTime();  //  更新时间
 bool isGameOver(int shape, int rot, int x, int y);  //检查游戏结束
 void gameOver();    //处理游戏结束
+void Gamepaused(); //游戏暂停方法
+bool checkAnyKeyPressed(); //检测键盘输入任意键
+void handleInput(); //处理键盘输入
+bool modifykey(char* key, char mfkey); //键位修改
 
 
-int main() {
-	initgraph(WIN_WIDTH, WIN_HEIGHT);   // 初始化图形窗口
+
+void main() {
+    initgraph(WIN_WIDTH, WIN_HEIGHT);   // 初始化图形窗口
     BeginBatchDraw();//开启双缓冲
-	initGame(); // 初始化游戏数据（生成初始方块、清空地图、初始化分数和时间）
-    while (true) 
+    initGame(); // 初始化游戏数据（生成初始方块、清空地图、初始化分数和时间）
+    //char* ch=NULL;
+    //ch=& keyset.keyquit;
+    //modifykey(ch,'G');
+    while (true)
     {
-		if (_kbhit()){ // 检测键盘输入
-			switch (_getch()) {// 获取按键
-            case 'w': case 'W': rotateBlock(); break;
-            case 'a': case 'A': moveBlock(-1, 0); break;
-            case 'd': case 'D': moveBlock(1, 0); break;
-            case 's': case 'S': moveBlock(0, 1); break;
-			case ' ': dropBlock(); break;   // 空格键快速落地
-			case 'q': case 'Q': closegraph(); return 0;// 退出游戏
-            }
-        }
-
-		static DWORD lastDropTime = 0;  // 记录上次自动下落时间
+        handleInput(); // 处理键盘输入
+        static DWORD lastDropTime = 0;  // 记录上次自动下落时间
         if (GetTickCount() - lastDropTime > 500) {
-			if (!moveBlock(0, 1)) { // 无法下移，固定方块
+            if (!moveBlock(0, 1)) { // 无法下移，固定方块
                 for (int i = 0; i < 4; i++) {
                     for (int j = 0; j < 4; j++) {
-						if (blockShape[currShape][currRot][i][j]) { // 固定方块到游戏区域
+                        if (blockShape[currShape][currRot][i][j]) { // 固定方块到游戏区域
                             int x = currX + j;
                             int y = currY + i;
-							if (y >= 0) gameArea[y][x] = currShape + 1; // 使用非0值表示有方块
+                            if (y >= 0) gameArea[y][x] = currShape + 1; // 使用非0值表示有方块
                         }
                     }
                 }
-				eliminateLines();   // 消除满行
+                eliminateLines();   // 消除满行
 
                 if (isGameOver(currShape, currRot, currX, currY)) { // 检测新生成的当前方块是否碰撞（游戏结束判定）
                     gameOver();
-                    break;  //跳出大循环
+                    break;
                 }
-				// 生成新方块
+                // 生成新方块
                 currShape = nextShape;
-				currRot = 0;               // 新方块初始旋转状态
-				currX = WIDTH / 2 - 2;    // 新方块X初始位置
-				currY = -4;              // 新方块Y初始位置
-				createBlock(nextShape, currRot, currX, currY);  
+                currRot = 0;               // 新方块初始旋转状态
+                currX = WIDTH / 2 - 2;    // 新方块X初始位置
+                currY = -4;              // 新方块Y初始位置
+                createBlock(nextShape, currRot, currX, currY);
             }
-			lastDropTime = GetTickCount();  // 更新下落时间
+            lastDropTime = GetTickCount();  // 更新下落时间
         }
 
-		//更新显示
+        //更新显示
         updateTime();
-        cleardevice(); 
-        drawGameArea(); 
-        drawBlock(currShape, currRot, currX, currY); 
-        drawInfo(); 
-
-		FlushBatchDraw();   // 刷新绘图，将双缓冲中的内容显示到屏幕上
-		Sleep(10);   // 减少CPU占用
+        cleardevice();  //清屏
+        drawGameArea();
+        drawBlock(currShape, currRot, currX, currY);
+        drawInfo();
+        FlushBatchDraw();   // 刷新绘图，将双缓冲中的内容显示到屏幕上
+        Sleep(10);   // 减少CPU占用
     }
-	closegraph();   // 关闭图形窗口
-    return 0;
+    closegraph();   // 关闭图形窗口
 }
 
 //初始化游戏
 void initGame() {
     srand((unsigned int)time(NULL));
     startTime = time(NULL);
+    // 初始化按键配置
+    keyset.keyrotate = 'W';
+    keyset.keyleft = 'A';
+    keyset.keyright = 'D';
+    keyset.keydown = 'S';
+    keyset.keydrop = ' ';
+    keyset.keyquit = 'Q';
+    keyset.keypause = 'P';
 
     for (int i = 0; i < HEIGHT; i++)
         for (int j = 0; j < WIDTH; j++)
             gameArea[i][j] = 0;
-	int tempX, tempY;  // 临时变量,防止createBlock修改下一个currX,currY
-    tempX = currX;  
+    int tempX, tempY;  // 临时变量,防止createBlock修改下一个currX,currY
+    tempX = currX;
     tempY = currY;
-	createBlock(currShape, currRot, tempX,tempY);  // 创建当前方块
-	createBlock(nextShape, currRot, currX, currY);  // 创建下一个方块
+    createBlock(currShape, currRot, tempX, tempY);  // 创建当前方块
+    createBlock(nextShape, currRot, currX, currY);  // 创建下一个方块
 }
 
 //创建新方块
-void createBlock(int& shape,int& rot,int& x,int& y) {    
-	shape = rand() % 7;   // 随机选择方块形状
-	rot = 0;             // 初始旋转状态
-	x = WIDTH/2-2;      // 初始位置在顶部中央
-	y = -4;            // 初始位置在顶部外
+void createBlock(int& shape, int& rot, int& x, int& y) {
+    shape = rand() % 7;   // 随机选择方块形状
+    rot = 0;             // 初始旋转状态
+    x = WIDTH / 2 - 2;      // 初始位置在顶部中央
+    y = -4;            // 初始位置在顶部外
 }
 
 //绘制方块
@@ -200,10 +227,10 @@ void drawBlock(int shape, int rot, int x, int y) {  // x,y为方块左上角在�
             if (blockShape[shape][rot][i][j] && (y + i >= 0)) {
                 int drawX = (x + j) * BLOCK_SIZE;
                 int drawY = (y + i) * BLOCK_SIZE;
-				setfillcolor(blockColor[shape + 1]);                    // shape从0开始，颜色从1开始
-				solidrectangle(drawX, drawY, drawX + BLOCK_SIZE - 1, drawY + BLOCK_SIZE - 1);// 绘制方块
-				setlinecolor(blockColor[0]);                // 设置边框颜色
-				rectangle(drawX, drawY, drawX + BLOCK_SIZE - 1, drawY + BLOCK_SIZE - 1);    // 绘制边框
+                setfillcolor(blockColor[shape + 1]);                    // shape从0开始，颜色从1开始
+                solidrectangle(drawX, drawY, drawX + BLOCK_SIZE - 1, drawY + BLOCK_SIZE - 1);// 绘制方块
+                setlinecolor(blockColor[0]);                // 设置边框颜色
+                rectangle(drawX, drawY, drawX + BLOCK_SIZE - 1, drawY + BLOCK_SIZE - 1);    // 绘制边框
             }
         }
     }
@@ -211,23 +238,23 @@ void drawBlock(int shape, int rot, int x, int y) {  // x,y为方块左上角在�
 
 //绘制游戏区域
 void drawGameArea() {
-	setlinecolor(RED);  // 设置边框颜色
-	rectangle(0, 0, WIDTH * BLOCK_SIZE, HEIGHT * BLOCK_SIZE);   // 绘制边框
+    setlinecolor(RED);  // 设置边框颜色
+    rectangle(0, 0, WIDTH * BLOCK_SIZE, HEIGHT * BLOCK_SIZE);   // 绘制边框
 
-	// 绘制网格和已固定的方块
-	for (int i = 0; i < HEIGHT; i++) { 
+    // 绘制网格和已固定的方块
+    for (int i = 0; i < HEIGHT; i++) {
         for (int j = 0; j < WIDTH; j++) {
             int x = j * BLOCK_SIZE;
             int y = i * BLOCK_SIZE;
-			setlinecolor(LIGHTGRAY);    // 设置网格线颜色
-			line(x, 0, x, HEIGHT * BLOCK_SIZE);     // 绘制竖线,line(x1, y1, x2, y2),x1=x2时为竖线,y1=y2时为横线
-			line(0, y, WIDTH * BLOCK_SIZE, y);      // 绘制横线,x1表示起点横坐标,y1表示起点纵坐标,x2表示终点横坐标,y2表示终点纵坐标
+            setlinecolor(LIGHTGRAY);    // 设置网格线颜色
+            line(x, 0, x, HEIGHT * BLOCK_SIZE);     // 绘制竖线,line(x1, y1, x2, y2),x1=x2时为竖线,y1=y2时为横线
+            line(0, y, WIDTH * BLOCK_SIZE, y);      // 绘制横线,x1表示起点横坐标,y1表示起点纵坐标,x2表示终点横坐标,y2表示终点纵坐标
 
             if (gameArea[i][j] != 0) {
-				setfillcolor(blockColor[gameArea[i][j]]);                      // 设置方块颜色
-				solidrectangle(x, y, x + BLOCK_SIZE - 1, y + BLOCK_SIZE - 1); // 绘制方块
-				setlinecolor(BLACK);                                         // 设置边框颜色
-				rectangle(x, y, x + BLOCK_SIZE - 1, y + BLOCK_SIZE - 1);    // 绘制边框
+                setfillcolor(blockColor[gameArea[i][j]]);                      // 设置方块颜色
+                solidrectangle(x, y, x + BLOCK_SIZE - 1, y + BLOCK_SIZE - 1); // 绘制方块
+                setlinecolor(RED);                                         // 设置边框颜色
+                rectangle(x, y, x + BLOCK_SIZE-1, y+BLOCK_SIZE-1);    // 绘制边框
             }
         }
     }
@@ -236,21 +263,19 @@ void drawGameArea() {
 //绘制右侧信息区
 void drawInfo() {
 
-	int infoX = WIDTH * BLOCK_SIZE + 10;  // 右侧信息区起始X坐标
-	settextcolor(blockColor[9]);          // 设置文本颜色
-	setbkmode(TRANSPARENT);     // 设置文本背景透明
+    int infoX = WIDTH * BLOCK_SIZE + 10;  // 右侧信息区起始X坐标
+    settextcolor(blockColor[9]);          // 设置文本颜色
+    setbkmode(TRANSPARENT);     // 设置文本背景透明
 
     // 绘制分数（使用宽字符数组和swprintf_s）
-    WCHAR scoreText[20];  // 宽字符数组
+    WCHAR scoreText[20];                // 宽字符数组
     swprintf_s(scoreText, L"分数: %d", score);  // 直接格式化宽字符串
-	outtextxy(infoX, 20, scoreText);    // 绘制分数
+    outtextxy(infoX, 20, scoreText);    // 绘制分数
 
     // 绘制游戏时间
-    WCHAR timeText[20];  // 宽字符数组
+    WCHAR timeText[20];          // 宽字符数组
     swprintf_s(timeText, L"时间: %ds", gameTime);  // 直接格式化宽字符串
-	outtextxy(infoX, 60, timeText);     // 绘制时间
-     
-
+    outtextxy(infoX, 60, timeText);     // 绘制时间
 
     // *****绘制下一个方块提示*****
     outtextxy(infoX, 100, L"下一个:");  // 直接使用宽字符串前缀L
@@ -262,17 +287,17 @@ void drawInfo() {
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 4; j++) {
             if (blockShape[nextShape][0][i][j]) {
-                int drawX = nextX+j*BLOCK_SIZE;
-                int drawY = nextY+i*BLOCK_SIZE;
+                int drawX = nextX + j * BLOCK_SIZE;
+                int drawY = nextY + i * BLOCK_SIZE;
                 setfillcolor(blockColor[nextShape + 1]);                            //方块颜色
-				solidrectangle(drawX,drawY,drawX+BLOCK_SIZE-1,drawY+BLOCK_SIZE-1);//绘制方块
-				setlinecolor(blockColor[0]);                                            //边框颜色
-				rectangle(drawX,drawY,drawX+BLOCK_SIZE-1,drawY+BLOCK_SIZE-1);//绘制边框
+                solidrectangle(drawX, drawY, drawX + BLOCK_SIZE - 1, drawY + BLOCK_SIZE - 1);//绘制方块
+                setlinecolor(blockColor[0]);                                            //边框颜色
+                rectangle(drawX, drawY, drawX + BLOCK_SIZE - 1, drawY + BLOCK_SIZE - 1);//绘制边框
             }
         }
     }
 
-	// 绘制操作提示（直接使用宽字符串前缀L),outtextxy(x, y, L"文本内容")函数支持宽字符串的输出
+    // 绘制操作提示（直接使用宽字符串前缀L),outtextxy(x, y, L"文本内容")函数支持宽字符串的输出
     outtextxy(infoX, 220, L"操作:");
     outtextxy(infoX, 240, L"W - 旋转");
     outtextxy(infoX, 260, L"A - 左移");
@@ -305,7 +330,7 @@ bool checkCollision(int shape, int rot, int x, int y) {
                 }
 
                 // 4. 与已固定方块的碰撞：当前格子在游戏区域内（gridY >=0），且已有方块
-                if (gameArea[gridY][gridX] != 0) {
+                if (gridY >= 0 && gameArea[gridY][gridX] != 0) {
                     return true;        // 与已固定的方块重叠，碰撞
                 }
             }
@@ -317,8 +342,8 @@ bool checkCollision(int shape, int rot, int x, int y) {
 
 //旋转方块
 void rotateBlock() {
-	int newRot = (currRot + 1) % 4;                        // 计算新的旋转状态(循环)
-	if (!checkCollision(currShape, newRot, currX, currY)) // 无碰撞，更新旋转状态
+    int newRot = (currRot + 1) % 4;                        // 计算新的旋转状态(循环)
+    if (!checkCollision(currShape, newRot, currX, currY)) // 无碰撞，更新旋转状态
         currRot = newRot;
 }
 
@@ -326,7 +351,7 @@ void rotateBlock() {
 bool moveBlock(int dx, int dy) {
     int newX = currX + dx;
     int newY = currY + dy;
-	if (!checkCollision(currShape, currRot, newX, newY)) {  // 无碰撞，更新位置
+    if (!checkCollision(currShape, currRot, newX, newY)) {  // 无碰撞，更新位置
         currX = newX;
         currY = newY;
         return true;
@@ -341,32 +366,32 @@ void dropBlock() {
 
 //消除满行
 void eliminateLines() {
-	int lineCount = 0;  // 记录消除的行数
-	for (int i = HEIGHT - 1; i >= 0; i--) {     // 从底部开始检查每一行
-		bool isFull = true;                     // 检查变量，当前行是否满
-		for (int j = 0; j < WIDTH; j++) {      //每列检查是否都有方块
+    int lineCount = 0;  // 记录消除的行数
+    for (int i = HEIGHT - 1; i >= 0; i--) {     // 从底部开始检查每一行
+        bool isFull = true;                     // 检查变量，当前行是否满
+        for (int j = 0; j < WIDTH; j++) {      //每列检查是否都有方块
             if (gameArea[i][j] == 0) {
                 isFull = false;
                 break;
             }
         }
 
-		if (isFull) {       // 如果当前行满，消除该行
+        if (isFull) {       // 如果当前行满，消除该行
             lineCount++;
-            for (int k = i;k>0;k--)
-                for (int j = 0; j<WIDTH; j++)
-                    gameArea[k][j] = gameArea[k-1][j];
-            for (int j = 0; j<WIDTH;j++)
+            for (int k = i; k > 0; k--)
+                for (int j = 0; j < WIDTH; j++)
+                    gameArea[k][j] = gameArea[k - 1][j];
+            for (int j = 0; j < WIDTH; j++)
                 gameArea[0][j] = 0;
             i++;
         }
     }
 
-	switch (lineCount) {    // 根据消除行数更新分数
+    switch (lineCount) {    // 根据消除行数更新分数
     case 1: score += 10; break;
     case 2: score += 30; break;
     case 3: score += 50; break;
-	case 4: score += 80; break; // 四行一次性消除，得分最高
+    case 4: score += 80; break; // 四行一次性消除，得分最高
     }
 }
 
@@ -375,20 +400,10 @@ void updateTime() {
     gameTime = (int)(time(NULL) - startTime);
 }
 
-// 显示当前时间   
-void currentTime() {
-	WCHAR timeText[20];  // 宽字符数组
-
-	swprintf_s(timeText, L"当前时间: %02d:%02d:%02d",
-		(gameTime / 3600) % 24, (gameTime / 60) % 60, gameTime % 60);
-
-	outtextxy(WIN_WIDTH - 150, WIN_HEIGHT - 30, timeText);
-}
-
 //检查游戏结束
 bool isGameOver(int shape, int rot, int x, int y) {
-    for (int i = 0; i < 4; i++) 
-        for (int j = 0; j < 4; j++)    
+    for (int i = 0; i < 4; i++)
+        for (int j = 0; j < 4; j++)
             if (blockShape[shape][rot][i][j] == 1) {
                 int gridY = y + i;  // 转换为游戏区域的行坐标
                 if (gridY < 0) {
@@ -401,7 +416,7 @@ bool isGameOver(int shape, int rot, int x, int y) {
 //处理游戏结束
 void gameOver() {
     cleardevice();  // 清屏
-    while(1) {
+    while (1) {
         settextcolor(RED);  // 设置文本颜色
         settextstyle(40, 0, L"宋体");  // 宽字符字体名，结束标题
         outtextxy(WIN_WIDTH / 2 - 120, WIN_HEIGHT / 2 - 60, L"游戏结束！");
@@ -412,9 +427,102 @@ void gameOver() {
 
         settextstyle(20, 0, L"宋体");  // 宽字符字体名
         outtextxy(WIN_WIDTH / 2 - 80, WIN_HEIGHT / 2 + 40, L"按任意键退出...");
-        if (_kbhit())
-            break;
         FlushBatchDraw();   // 刷新绘图，将双缓冲中的内容显示到屏幕上
-        Sleep(10);   // 减少CPU占用
+        if (checkAnyKeyPressed())
+            break;  //检测按键，退出循环然后关闭窗口 
+        Sleep(100);   // 减少CPU占用
     }
+    cleardevice();
+    closegraph();
+    exit(0);
+}
+
+//游戏暂停方法
+void Gamepaused() {
+    cleardevice();// 清屏
+    settextcolor(blockColor[9]);                       // 设置文本颜色
+    settextstyle(40, 0, L"宋体");             // 宽字符字体名，暂停标题
+    outtextxy(WIN_WIDTH / 2 - 80, WIN_HEIGHT / 2 - 60, L"游戏暂停");
+    settextstyle(20, 0, L"宋体");              // 宽字符字体名
+    outtextxy(WIN_WIDTH / 2 - 100, WIN_HEIGHT / 2, L"按暂停键继续...");
+    FlushBatchDraw();// 刷新绘图，将双缓冲中的内容显示到屏幕上
+    while (GetAsyncKeyState(keyset.keypause));  //等待松开暂停键
+    while (true)                        //在暂停中等待按键触发
+        if (GetAsyncKeyState(keyset.keypause) & 0x8000)
+            break;
+    startTime = time(NULL) - gameTime;  //调整时间，删除暂停时间
+}
+
+//检测键盘输入任意键位
+bool checkAnyKeyPressed() {
+    for (int key = 8; key <= 255; ++key) { //遍历一遍键位
+        if (GetAsyncKeyState(key) & 0x8000) {
+            return true;  // 有任意键被按下
+        }
+    }
+    return false;
+}
+
+//处理键盘输入
+void handleInput() {
+
+    //各个键位是否被按下的bool值 （0x8000是按下)
+    bool isrotate = GetAsyncKeyState(keyset.keyrotate) & 0x8000;
+    bool isdown = GetAsyncKeyState(keyset.keydown) & 0x8000;
+    bool isleft = GetAsyncKeyState(keyset.keyleft) & 0x8000;
+    bool isright = GetAsyncKeyState(keyset.keyright) & 0x8000;
+    bool isdrop = GetAsyncKeyState(keyset.keydrop) & 0x8000;
+    bool isquit = GetAsyncKeyState(keyset.keyquit) & 0x8000;
+    bool ispause = GetAsyncKeyState(keyset.keypause) & 0x8000;
+
+
+    // 只有在本帧按下，上一帧没按下时，才执行一次
+    if (isrotate && !KeyRotate)
+    {
+        rotateBlock();
+    } // 旋转方块
+    else if (isdown && !KeyDown)
+    {
+        moveBlock(0, 1);
+    }  // 下移方块
+    else if (isleft && !KeyLeft)
+    {
+        moveBlock(-1, 0);
+    } // 左移方块
+    else if (isright && !KeyRight)
+    {
+        moveBlock(1, 0);
+    } // 右移方块
+    else if (isdrop && !KeyDrop)
+    {
+        dropBlock();
+    }// 快速落地
+    else if (isquit && !KeyQuit)
+    {
+        gameOver();
+    }  // 退出游戏
+    else if (ispause && !KeyPause)
+    {
+        Gamepaused();
+    }   // 暂停游戏
+
+// 更新上一帧的状态
+    KeyRotate = isrotate;
+    KeyDown = isdown;
+    KeyLeft = isleft;
+    KeyRight = isright;
+    KeyDrop = isdrop;
+    KeyQuit = isquit;
+    KeyPause = ispause;
+}
+
+//键位修改
+bool modifykey(char *key, char mfkey) {
+    if (mfkey == keyset.keyrotate || mfkey == keyset.keydown ||
+        mfkey == keyset.keyleft || mfkey == keyset.keyright ||
+        mfkey == keyset.keydrop || mfkey == keyset.keypause ||
+        mfkey == keyset.keyquit)    //检测键位是否占用
+        return false;
+    *key = mfkey;   //修改键位
+    return true;
 }
