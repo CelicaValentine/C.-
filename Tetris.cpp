@@ -1,108 +1,222 @@
-// tetris.cpp
-#include "tetris.h"
-#include <cstdlib>
-#include <ctime>
 
-// Block�๹�캯��ʵ�֣������ʼ������
-Block::Block() {
-    std::srand(std::time(0));  // ��ʼ�����������
-    shapeIndex = std::rand() % SHAPES.size();  // ���ѡ����״
-    color = COLORS[shapeIndex];                // ƥ����ɫ
-    rotation = 0;                              // ��ʼ��ת״̬
-    // ��ʼλ�ã���������
-    x = GRID_COLUMNS / 2 - SHAPES[shapeIndex][0].size() / 2;
-    y = 0;
-}
+//设置界面
+void Setting()
+{
+	if (msg.message == WM_KEYUP) { Sleep(100); }    //防止连跳
+    Sleep(100);
+    int selected = 0; // 当前选中项判断值（0:退出, 1:设置速度, 2:设置键位，3：设置背景颜色，4：设置音乐）
+    cleardevice();  //清屏
+    settextcolor(WHITE);    //字体颜色
+    settextstyle(20, 0, L"宋体");
+    outtextxy(WIN_WIDTH / 2 - 150, 0, L"设置");
+    settextstyle(25, 0, L"宋体");
+    // 菜单选项文本（按顺序存储，方便循环绘制）
+    const wchar_t* menuItems[5] = { L"退出", L"设置速度", L"设置键位" , L"设置背景色" , L"设置音乐" };
+    int itemY[5] = { WIN_HEIGHT / 2 - 80 , WIN_HEIGHT / 2 - 40,WIN_HEIGHT / 2, WIN_HEIGHT / 2 + 40, WIN_HEIGHT / 2 + 80, }; // 每个选项的Y坐标
+    while (true) {
+        setbkmode(OPAQUE);          // 开启透明背景  
+        setbkcolor(blockColor[colorcode]);
+        // 1. 绘制所有菜单选项（未选中状态）
+        for (int i = 0; i < 5; i++) {
 
-// ʵ�֣���ȡ��ǰ��ת״̬����״��90��˳ʱ����ת��
-std::vector<std::vector<int>> Block::getCurrentShape() {
-    auto& original = SHAPES[shapeIndex];
-    int rows = original.size();
-    int cols = original[0].size();
-
-    if (rotation == 0) return original;  // 0����תֱ�ӷ���ԭ��״
-
-    // ��ת�߼�������ת�ò���ת��
-    std::vector<std::vector<int>> rotated(cols, std::vector<int>(rows, 0));
-    for (int i = 0; i < rows; i++) {
-        for (int j = 0; j < cols; j++) {
-            rotated[j][rows - 1 - i] = original[i][j];
+            settextcolor(WHITE); // 未选中文字为
+            outtextxy(WIN_WIDTH / 2 - 100, itemY[i], menuItems[i]);//通过i找到要渲染文字的坐标
         }
+        // 2. 绘制当前选中项的边框和高亮文字
+        settextcolor(YELLOW); // 选中文字为黄色
+        drawTextBorder(WIN_WIDTH / 2 - 100, itemY[selected], menuItems[selected], RED, BLACK);
+        outtextxy(WIN_WIDTH / 2 - 100, itemY[selected], menuItems[selected]);
+
+        if (peekmessage(&msg, EX_KEY))  //键盘的输入处理
+        {
+            if (msg.message == WM_KEYDOWN)
+            {
+                if (msg.vkcode == VK_UP) //上键处理
+                    selected = (selected - 1 + 5) % 5; // 循环上移
+                else if (msg.vkcode == VK_DOWN)  //下键处理
+                    selected = (selected + 1) % 5; // 循环下移
+                else if (msg.vkcode == VK_RETURN)    //回车处理_选项
+                    switch (selected) 
+                    {
+                        case 0:
+                            return;
+                        case 1:
+                            SpeedChoice();
+                            return;
+                        case 2:
+                            return;
+                        case 3:
+                            colormodle();
+                            return;
+                        case 4:
+                            return;
+                    }
+            }
+            else if (msg.message == WM_KEYUP) { Sleep(100); }
+        }
+
+
+
+        //if (GetAsyncKeyState(VK_UP) & 0x8000) {
+        //    selected = (selected - 1 + 5) % 5; // 循环上移（0→2）
+        //    Sleep(150); // 防止连跳
+        //}
+        //else if (GetAsyncKeyState(VK_DOWN) & 0x8000) {
+        //    selected = (selected + 1) % 5; // 循环下移（2→0）
+        //    Sleep(150);
+        //}
+
+        //else if (GetAsyncKeyState(VK_RETURN) & 0x8000) {
+        //    switch (selected) {
+        //    case 0:
+        //        return; 
+        //    case 1:
+        //        SpeedChoice();
+        //        return;
+        //    case 2:
+        //        return;
+        //    case 3:
+        //        colormodle();
+        //        return;
+        //    case 4:
+        //        return;
+
+
+        FlushBatchDraw();   //渲染缓冲数据
+        Sleep(16);          //降低刷新
     }
-    return rotated;
 }
 
-// GameArea�๹�캯��ʵ�֣���ʼ��������
-GameArea::GameArea() {
-    grid.resize(GRID_ROWS, std::vector<int>(GRID_COLUMNS, -1));
-}
 
-// ʵ�֣���ײ��⣨�߽�+���з��飩
-bool GameArea::isCollision(Block& block) {
-    auto shape = block.getCurrentShape();
-    int rows = shape.size();
-    int cols = shape[0].size();
+void SetColor(){
+        cleardevice();
+        int selected = 0; // 当前选中项（0:黑色, 1:浅灰色, 2:咖啡色, 3:ihuf）
+        settextstyle(15, 0, L"宋体");
+        const wchar_t* menuItems[4] = { L"黑色", L"浅灰色", L"咖啡色", L"ihuf" };
+        int itemY[4] = { WIN_HEIGHT / 2 - 40, WIN_HEIGHT / 2, WIN_HEIGHT / 2 + 40, WIN_HEIGHT / 2 + 80 };
 
-    for (int i = 0; i < rows; i++) {
-        for (int j = 0; j < cols; j++) {
-            if (shape[i][j] == 1) {  // ����ⷽ�����Ч����
-                int gridX = block.x + j;
-                int gridY = block.y + i;
-                // ����Ƿ񳬳��߽�������з����ص�
-                if (gridX < 0 || gridX >= GRID_COLUMNS ||
-                    gridY >= GRID_ROWS ||
-                    (gridY >= 0 && grid[gridY][gridX] != -1)) {
-                    return true;  // ��ײ
+        while (true) {
+            cleardevice();
+            settextcolor(RED);
+            settextstyle(20, 0, L"宋体");
+            outtextxy(WIN_WIDTH / 2 - 150, WIN_HEIGHT / 2 - 100, L"选择颜色");
+
+                for (int i = 0; i < 4; i++) {   //绘制所有菜单选项（未选中的）
+                settextcolor(WHITE);
+                outtextxy(WIN_WIDTH / 2 - 100, itemY[i], menuItems[i]);
                 }
-            }
-        }
-    }
-    return false;  // ����ײ
-}
 
-// ʵ�֣�������̶�������
-void GameArea::lockBlock(Block& block) {
-    auto shape = block.getCurrentShape();
-    int rows = shape.size();
-    int cols = shape[0].size();
+                settextcolor(YELLOW);
+                drawTextBorder(WIN_WIDTH / 2 - 100, itemY[selected], menuItems[selected], RED, BLACK);
+                outtextxy(WIN_WIDTH / 2 - 100, itemY[selected], menuItems[selected]);
+                FlushBatchDraw();   //渲染缓冲内容
 
-    for (int i = 0; i < rows; i++) {
-        for (int j = 0; j < cols; j++) {
-            if (shape[i][j] == 1) {
-                int gridX = block.x + j;
-                int gridY = block.y + i;
-                if (gridY >= 0) {  // ���Գ��������Ĳ���
-                    grid[gridY][gridX] = block.shapeIndex;
+                //处理按键输入
+                if (peekmessage(&msg, EX_KEY))  //键盘的输入处理
+                {
+                    if (msg.message == WM_KEYDOWN)
+                    {
+                        if (msg.vkcode == VK_UP) //上键处理
+                            selected = (selected - 1 + 4) % 4; // 循环上移
+                        else if (msg.vkcode == VK_DOWN)  //下键处理
+                            selected = (selected + 1 + 4) % 4; // 循环下移
+                        else if (msg.vkcode == VK_RETURN)    //回车处理_选项
+                            switch (selected) 
+                            {
+                                case 0: colorcode = 0; return;
+                                case 1: colorcode = 9; return;
+                                case 2: colorcode = 10; return;
+                                case 3: colorcode = 11; return;
+                            }
+                    }
+                    else if (msg.message == WM_KEYUP) { Sleep(100); }
                 }
-            }
+
+                //// 处理按键
+                //if (GetAsyncKeyState(VK_UP) & 0x8000) {
+                //selected = (selected - 1 + 4) % 4;
+                //Sleep(150);
+                //}
+                //else if (GetAsyncKeyState(VK_DOWN) & 0x8000) {
+                //selected = (selected + 1) % 4;
+                //Sleep(150);
+                //}
+                //else if (GetAsyncKeyState(VK_RETURN) & 0x8000) {
+                //    switch (selected) {
+                //    case 0: colorcode = 0; return;
+                //    case 1: colorcode = 9; return;
+                //    case 2: colorcode = 10; return;
+                //    case 3: colorcode = 11; return;
+                //    }
+                //    Sleep(150);
+                //   }
         }
     }
-}
-
-// ʵ�֣�������Ϸ������ѹ̶��ķ���
-void GameArea::render(SDL_Renderer* renderer) {
-    // ��������߿�
-    SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255);
-    SDL_Rect border = {
-        GAME_AREA_X - 1, GAME_AREA_Y - 1,
-        GRID_COLUMNS * GRID_SIZE + 2,
-        GRID_ROWS * GRID_SIZE + 2
-    };
-    SDL_RenderDrawRect(renderer, &border);
-
-    // �����ѹ̶��ķ���
-    for (int i = 0; i < GRID_ROWS; i++) {
-        for (int j = 0; j < GRID_COLUMNS; j++) {
-            if (grid[i][j] != -1) {
-                SDL_Color color = COLORS[grid[i][j]];
-                SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
-                SDL_Rect rect = {
-                    GAME_AREA_X + j * GRID_SIZE,
-                    GAME_AREA_Y + i * GRID_SIZE,
-                    GRID_SIZE - 1, GRID_SIZE - 1  // ����϶
-                };
-                SDL_RenderFillRect(renderer, &rect);
-            }
+        
+void colormodle()
+{
+    cleardevice();   //清屏
+    int selected = 0; // 当前选中项 0：设置背景色 、 1：设置方块色
+    settextstyle(30, 0, L"宋体");
+    // 菜单选项文本（按顺序存储，方便循环绘制）
+    const wchar_t* menuItems[2] = { L"设置背景色", L"设置方块色" };
+    int itemY[2] = { WIN_HEIGHT / 2 - 40, WIN_HEIGHT / 2 };
+    while (true) {
+        settextcolor(WHITE);
+        settextstyle(20, 0, L"宋体");
+        outtextxy(WIN_WIDTH / 2 - 150, WIN_HEIGHT / 2 - 100, L"");
+        // 1. 绘制所有菜单选项（未选中状态）
+        for (int i = 0; i < 2; i++) {
+            settextcolor(WHITE); // 未选中文字为白
+            outtextxy(WIN_WIDTH / 2 - 100, itemY[i], menuItems[i]);//通过i找到要渲染文字的坐标，依次显示文字
         }
+        // 2. 绘制当前选中项的边框和高亮文字
+        settextcolor(YELLOW); // 选中文字为黄色
+        drawTextBorder(WIN_WIDTH/2-100,itemY[selected],menuItems[selected],RED,BLACK);
+        outtextxy(WIN_WIDTH / 2 - 100, itemY[selected], menuItems[selected]);
+
+        // 3. 处理按键输入
+        if (peekmessage(&msg, EX_KEY))  //键盘的输入处理
+        {
+            if (msg.message == WM_KEYDOWN)
+            {
+                if (msg.vkcode == VK_UP) //上键处理
+                    selected = (selected - 1 + 2) % 2; // 循环上移
+                else if (msg.vkcode == VK_DOWN)  //下键处理
+                    selected = (selected + 1 + 2) % 2; // 循环下移
+                else if (msg.vkcode == VK_RETURN)    //回车处理_选项
+                    switch (selected)
+                    {
+                        case 0: SetColor(); return; // 开始游戏
+                        case 1:colorcode = 1; return;
+                    }
+            }
+            else if (msg.message == WM_KEYUP) { Sleep(100); }
+        }
+        
+        //if (_kbhit()) {
+        //    int key = _getch(); // 用int接收方向键的双字节扫描码
+        //    if (key == 0xE0) { // 方向键前缀码
+        //        key = _getch(); // 获取实际方向键扫描码
+        //        switch (key) {
+        //        case 0x48: // 上箭头
+        //            selected = (selected - 1 + 2) % 2; // 循环上移（0→2）
+
+        //            break;
+        //        case 0x50: // 下箭头
+        //            selected = (selected + 1) % 2; // 循环下移（2→0）
+        //            break;
+
+        //        }
+        //    }
+        //    else if (key == 13) {
+        //        switch (selected) {
+        //        case 0: SetColor(); return; // 开始游戏
+        //        case 1:colorcode = 1; return;
+        //        }
+        //    }
+        //}
+        FlushBatchDraw();
+        Sleep(10);
     }
 }
