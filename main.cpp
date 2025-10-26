@@ -1,4 +1,4 @@
-
+﻿
 #define _CRT_SECURE_NO_WARNINGS  // 解决sprintf安全警告
 #include <graphics.h>
 #include <conio.h>
@@ -6,7 +6,6 @@
 #include <windows.h>
 #include <iostream>
 #include<easyx.h>
-
 using namespace std;
 
 // 定义常量（方块大小、游戏区域尺寸等）
@@ -36,15 +35,16 @@ COLORREF blockColor[] = {
 
 //************游戏的全局变量****************//
 typedef struct KeyConfig {
-    char keyrotate; // 旋转
-    char keyleft;   // 左移
-    char keyright;  // 右移
-    char keydown;   // 下移
-    char keydrop;   // 快速落地
-    char keyquit;   // 退出游戏
-    char keypause;  // 暂停游戏
+    int keyrotate; // 旋转
+    int keyleft;   // 左移
+    int keyright;  // 右移
+    int keydown;   // 下移
+    int keydrop;   // 快速落地
+    int keyquit;   // 退出游戏
+    int keypause;  // 暂停游戏
 }Key; Key keyset;
 ExMessage msg = { 0 };  //建立外设输入的结构体存储
+
 
 
 // 定义7种俄罗斯方块形状（4x4矩阵）
@@ -109,12 +109,10 @@ int nextShape;
 int score = 0;
 int gameTime = 0;   //游戏游玩时长
 time_t startTime;   // 游戏开始时间
+int speed = 1000;   //初始速度
+int iscore = 0;     //速度挡位，初始为变速
+int colorcode = 0;  //背景颜色编号标识
 
-int speed = 1000;
-int iscore = 0;
-int colorcode = 0;
-
-bool modifykeyflag = false; //键位修改标识
 
 
 // 函数声明
@@ -134,31 +132,34 @@ void gameOver();    //处理游戏结束
 void Gamepaused(); //游戏暂停方法
 bool checkAnyKeyPressed(); //检测键盘输入任意键
 void handleInput(); //处理键盘输入
-//void SpeedChoice(int score);
 void Menusq(); //菜单页面
 void Setting();
 void drawTextBorder(int x, int y, const wchar_t* text, COLORREF textColor, COLORREF bgColor);
 //void Confirm();
+void SpeedChoice();
 void Speed();
 void SetColor();
 void colormodle();
-//bool modifykey(char* key, char mfkey); //键位修改
+//*******************************************************
+void modifykey_UI(); //键位修改
+void modifykey(int selected, int kkey[], int itemY[]);
+const wchar_t* VKmap(int vk);
+bool isKeyConflict(int newVk, int exclude);
+void initkeyboard();
 
 
 /*————————————————————————————游戏的线程————————————————————————————————————————*/
 int main() {
     initgraph(WIN_WIDTH, WIN_HEIGHT);   // 初始化图形窗口
+    initkeyboard();     //键位初始化，从初始化游戏分开，避免重置键位
     BeginBatchDraw();//开启双缓冲
-    //char* ch=NULL;
-    //ch=& keyset.keyquit;
-    //modifykey(ch,'G');
     Menusq();
-
     while (true)
     {
         handleInput(); // 处理键盘输入
         static DWORD lastDropTime = 0;  // 记录上次自动下落时间
-        if (GetTickCount() - lastDropTime > 500) {
+        Speed();
+        if (GetTickCount() - lastDropTime > speed) {
             if (!moveBlock(0, 1)) { // 无法下移，固定方块
                 for (int i = 0; i < 4; i++) {
                     for (int j = 0; j < 4; j++) {
@@ -201,15 +202,6 @@ int main() {
 void initGame() {
     srand((unsigned int)time(NULL));
     startTime = time(NULL);
-    // 初始化按键配置
-    keyset.keyrotate = 'W';
-    keyset.keyleft = 'A';
-    keyset.keyright = 'D';
-    keyset.keydown = 'S';
-    keyset.keydrop = ' ';
-    keyset.keyquit = 'Q';
-    keyset.keypause = 'P';
-
     for (int i = 0; i < HEIGHT; i++)
         for (int j = 0; j < WIDTH; j++)
             gameArea[i][j] = 0;
@@ -246,9 +238,9 @@ void drawBlock(int shape, int rot, int x, int y) {  // x,y为方块左上角在�
 
 //绘制游戏区域
 void drawGameArea() {
-    setlinecolor(RED);  // 设置边框颜色
+    setlinecolor(LIGHTGRAY);  // 设置边框颜色
     rectangle(0, 0, WIDTH * BLOCK_SIZE, HEIGHT * BLOCK_SIZE);   // 绘制边框
-
+    setbkcolor(blockColor[colorcode]);      //背景色的选择
     // 绘制网格和已固定的方块
     for (int i = 0; i < HEIGHT; i++) {
         for (int j = 0; j < WIDTH; j++) {
@@ -261,7 +253,7 @@ void drawGameArea() {
             if (gameArea[i][j] != 0) {
                 setfillcolor(blockColor[gameArea[i][j]]);                      // 设置方块颜色
                 solidrectangle(x, y, x + BLOCK_SIZE - 1, y + BLOCK_SIZE - 1); // 绘制方块
-                setlinecolor(RED);                                         // 设置边框颜色
+                setlinecolor(LIGHTGRAY);                                         // 设置边框颜色
                 rectangle(x, y, x + BLOCK_SIZE - 1, y + BLOCK_SIZE - 1);    // 绘制边框
             }
         }
@@ -270,27 +262,37 @@ void drawGameArea() {
 
 //绘制右侧信息区
 void drawInfo() {
-
     int infoX = WIDTH * BLOCK_SIZE + 10;  // 右侧信息区起始X坐标
     settextcolor(blockColor[9]);          // 设置文本颜色
     setbkmode(TRANSPARENT);     // 设置文本背景透明
 
+    WCHAR times[20];  // 宽字符数组
+    time_t current_time;       // 时间戳变量（秒数）
+    struct tm* local_time;     // 本地时间结构体指针
+    // 获取当前时间戳（从1970-01-01 00:00:00 UTC开始的秒数）
+    current_time = time(NULL);
+    // 将时间戳转换为本地时间结构体
+    local_time = localtime(&current_time);
+    swprintf_s(times, L"%d时%d分%ds", local_time->tm_hour, local_time->tm_min, local_time->tm_sec);
+    outtextxy(infoX, 370, times);     // 绘制时间
+
     // 绘制分数（使用宽字符数组和swprintf_s）
     WCHAR scoreText[20];                // 宽字符数组
+    settextstyle(16, 0, L"宋体");
     swprintf_s(scoreText, L"分数: %d", score);  // 直接格式化宽字符串
-    outtextxy(infoX, 20, scoreText);    // 绘制分数
+    outtextxy(infoX, 15, scoreText);    // 绘制分数
 
     // 绘制游戏时间
     WCHAR timeText[20];          // 宽字符数组
-    swprintf_s(timeText, L"时间: %ds", gameTime);  // 直接格式化宽字符串
-    outtextxy(infoX, 60, timeText);     // 绘制时间
+    swprintf_s(timeText, L"时间: %d s", gameTime);  // 直接格式化宽字符串
+    outtextxy(infoX, 35, timeText);     // 绘制时间
 
     // *****绘制下一个方块提示*****
-    outtextxy(infoX, 100, L"下一个:");  // 直接使用宽字符串前缀L
+    outtextxy(infoX, 55, L"下一个方块:");  // 直接使用宽字符串前缀L
 
     // 绘制下一个方块
     int nextX = infoX + (BLOCK_SIZE * 4 - BLOCK_SIZE * 2) / 2;
-    int nextY = 120;
+    int nextY = 80;
 
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 4; j++) {
@@ -299,22 +301,46 @@ void drawInfo() {
                 int drawY = nextY + i * BLOCK_SIZE;
                 setfillcolor(blockColor[nextShape + 1]);                            //方块颜色
                 solidrectangle(drawX, drawY, drawX + BLOCK_SIZE - 1, drawY + BLOCK_SIZE - 1);//绘制方块
-                setlinecolor(blockColor[0]);                                            //边框颜色
+                setlinecolor(LIGHTGRAY);                                            //边框颜色
                 rectangle(drawX, drawY, drawX + BLOCK_SIZE - 1, drawY + BLOCK_SIZE - 1);//绘制边框
             }
         }
     }
 
     // 绘制操作提示（直接使用宽字符串前缀L),outtextxy(x, y, L"文本内容")函数支持宽字符串的输出
-    outtextxy(infoX, 220, L"操作:");
-    outtextxy(infoX, 240, L"W - 旋转");
-    outtextxy(infoX, 260, L"A - 左移");
-    outtextxy(infoX, 280, L"D - 右移");
-    outtextxy(infoX, 300, L"S - 下移");
-    outtextxy(infoX, 320, L"空格 - 落地");
-    outtextxy(infoX, 340, L"Q - 退出");
-}
+    wchar_t str[20];
+        settextstyle(14, 0, L"宋体");
+        wcscpy(str, L"旋转 -- "); //旋转
+        wcscat(str, VKmap(keyset.keyrotate));
+        outtextxy(infoX - 3, 180, str); str[0] = L'\0';
 
+        wcscpy(str, L"左移 -- "); //左移
+        wcscat(str, VKmap(keyset.keyleft));
+        outtextxy(infoX-3, 200, str); str[0] = L'\0';
+
+        wcscpy(str, L"右移 -- "); //右移
+        wcscat(str, VKmap(keyset.keyright));
+        outtextxy(infoX-3, 220, str); str[0] = L'\0';
+
+        wcscpy(str, L"下移 -- "); //下移
+        wcscat(str, VKmap(keyset.keydown));
+        outtextxy(infoX-3, 240, str); str[0] = L'\0';
+
+        wcscpy(str, L"落地 -- "); //落地
+        wcscat(str, VKmap(keyset.keydrop));
+        outtextxy(infoX-3, 260, str); str[0] = L'\0';
+
+        wcscpy(str, L"暂停 -- "); //暂停
+        wcscat(str, VKmap(keyset.keypause));
+        outtextxy(infoX-3, 280, str); str[0] = L'\0';
+
+        wcscpy(str, L"退出 -- "); //退出
+        wcscat(str, VKmap(keyset.keyquit));
+        outtextxy(infoX-3, 300, str); str[0] = L'\0';
+    
+    settextstyle(16, 0, L"宋体");
+    outtextxy(infoX, 350, L"现在时间");
+}
 
 //检测碰撞
 bool checkCollision(int shape, int rot, int x, int y) {
@@ -403,7 +429,7 @@ void eliminateLines() {
     }
 }
 
-// 更新时间
+//更新时间
 void updateTime() {
     gameTime = (int)(time(NULL) - startTime);
 }
@@ -474,7 +500,7 @@ bool checkAnyKeyPressed() {
     return false;
 }
 
-//处理键盘输入
+//处理键盘输入，《模板非黑框的键盘输入方式》
 void handleInput() {
 
     if (peekmessage(&msg, EX_KEY))
@@ -514,74 +540,307 @@ void handleInput() {
     }
 }
 
-//键位修改
-//bool modifykey(char* key, char mfkey) {
-//
-//    while (GetAsyncKeyState(key);  //等待松开暂停键
-//    while (true)                        //在暂停中等待按键触发
-//        if (GetAsyncKeyState(keyset.keypause) & 0x8000)
-//            break;
-//    if (mfkey == keyset.keyrotate || mfkey == keyset.keydown ||
-//        mfkey == keyset.keyleft || mfkey == keyset.keyright ||
-//        mfkey == keyset.keydrop || mfkey == keyset.keypause ||
-//        mfkey == keyset.keyquit)    //检测键位是否占用
-//        return false;
-//    *key = mfkey;   //修改键位
-//    return true;
-//}
+
+
+
+
+
+//键位初始化
+void initkeyboard() {
+    // 初始化按键配置
+    keyset.keyrotate = 'W';
+    keyset.keyleft = 'A';
+    keyset.keyright = 'D';
+    keyset.keydown = 'S';
+    keyset.keydrop = VK_SPACE;
+    keyset.keyquit = 'Q';
+    keyset.keypause = 'P';
+}
+
+//键位修改界面******************************************************************************************************未完成*************************************************
+void modifykey_UI() {
+    cleardevice();       //清屏
+    int selected = 0;   //当前选中项的判断值，0：退出 、1：旋转、 2：下移 、3：左移 、4：右移、 5：落地、 6：退游、 7：暂停
+    const wchar_t* menuItems[8] = { L" 退出", L" 旋转", L" 下移", L" 左移", L" 右移", L"快速落地", L"退出游戏", L" 暂停" };  // 菜单选项文本（按顺序存储，方便循环绘制）
+    int itemY[8] = { WIN_HEIGHT-30,WIN_HEIGHT/2-100,WIN_HEIGHT/2-70,WIN_HEIGHT/2-40,WIN_HEIGHT/2-10,WIN_HEIGHT/2+20,WIN_HEIGHT/2+50,WIN_HEIGHT / 2 + 80 }; // 每个选项的Y坐标
+    //key数组，键位存储
+    int key[8] = { 0, keyset.keyrotate,keyset.keydown,keyset.keyleft,keyset.keyright ,keyset.keydrop,keyset.keyquit ,keyset.keypause };
+
+    while(true)
+    {
+        cleardevice();       //清屏
+        settextcolor(BROWN);    //菜单字体颜色
+        settextstyle(30, 0, L"宋体");
+        outtextxy(WIN_WIDTH / 2 - 75, 10, L"按键设置");
+
+        for (int i = 0; i < 8; i++) {
+            settextstyle(25, 0, L"宋体");
+            settextcolor(WHITE); // 文字为白色
+            if(i!=0)
+            outtextxy(WIN_WIDTH/2+50 , itemY[i],VKmap(key[i])); //i找到要渲染 _键位的坐标
+            if(i==0)
+                outtextxy(WIN_WIDTH/2+80, itemY[0], menuItems[0]); //退出界面的坐标
+            else 
+                outtextxy(WIN_WIDTH / 2 - 70, itemY[i], menuItems[i]); //通过i找到要渲染提示文字的坐标
+        }
+
+        //绘制当前选中项的标识箭头
+        settextstyle(15, 0, L"宋体");
+        if (selected==0) {  //退出的
+            drawTextBorder(WIN_WIDTH / 2 + 70, itemY[selected]+3,L"->", WIDTH, BLACK);
+            outtextxy(WIN_WIDTH / 2 + 70, itemY[selected]+3, L"->");
+        }
+        else {//其他键的指示箭头
+            drawTextBorder(WIN_WIDTH / 2 - 100, itemY[selected]+3, L"->", WIDTH, BLACK);
+            outtextxy(WIN_WIDTH / 2 - 100, itemY[selected]+3, L"->");
+        }
+        FlushBatchDraw();   //渲染缓冲画面
+
+        if (peekmessage(&msg, EX_KEY))
+        {
+            if (msg.message == WM_KEYDOWN)
+            {
+                if (msg.vkcode == VK_UP)
+                    selected = (selected - 1 + 8) % 8;
+                else if (msg.vkcode == VK_DOWN)
+                    selected = (selected + 1 + 8) % 8;
+                else if (msg.vkcode == VK_RETURN)
+                    if (selected == 0) 
+                        return; // 退出键位设置界面  
+                    else 
+                        modifykey(selected, key, itemY);// 调用修改函数，传入当前选中项、VK数组、Y坐标
+            }
+            else if (msg.message == WM_KEYUP) { Sleep(16); }
+        }
+        Sleep(16);
+    }
+}
+
+//键位修改方法
+void modifykey(int selected,int kkey[],int itemY[]) {   //当前选中项的判断值，0：退出 、1：旋转、 2：下移 、3：左移 、4：右移、 5：落地、 6：退游、 7：暂停
+        bool isModified = false;
+        while (!isModified) 
+        {
+            settextstyle(25, 0, L"宋体");
+            settextcolor(YELLOW);   //选中变黄色
+            outtextxy(WIN_WIDTH / 2 + 50, itemY[selected], VKmap(kkey[selected]));
+            FlushBatchDraw();   //渲染缓冲画面
+
+            if (peekmessage(&msg, EX_KEY)) { // 检测按键输入
+                if (msg.message == WM_KEYDOWN) {
+                    int newVk = msg.vkcode; // 获取新键的VK值
+                    
+                    if (isKeyConflict(newVk, selected)) {   // 检测冲突
+                        settextcolor(RED);
+                        outtextxy(WIN_WIDTH / 2 - 100, WIN_HEIGHT / 2 + 110, L"按键已占用！");
+                        FlushBatchDraw();
+                        Sleep(1000); // 显示1秒
+                        cleardevice(); // 清屏
+                        return; // 回到配置界面
+                    }
+
+                    switch (selected) {     // 更新键位配置（根据selected修改对应的keyset成员）
+                    case 1: keyset.keyrotate = newVk; break;
+                    case 2: keyset.keydown = newVk; break;
+                    case 3: keyset.keyleft = newVk; break;
+                    case 4: keyset.keyright = newVk; break;
+                    case 5: keyset.keydrop = newVk; break;
+                    case 6: keyset.keyquit = newVk; break;
+                    case 7: keyset.keypause = newVk; break;
+                    }
+ 
+                    kkey[selected] = newVk; // 更新显示用的VK键数组
+                    isModified = true; // 标记修改完成
+                }
+            }
+            Sleep(16);
+        }
+
+}
+
+//VK虚拟键列表
+const wchar_t* VKmap(int vk) {
+    switch (vk) {
+        // 功能键
+    case VK_ESCAPE: return L"Esc";
+    //case VK_F1: return L"F1";
+    //case VK_F2: return L"F2";
+    //case VK_F3: return L"F3";
+    //case VK_F4: return L"F4";
+    //case VK_F5: return L"F5";
+    //case VK_F6: return L"F6";
+    //case VK_F7: return L"F7";
+    //case VK_F8: return L"F8";
+    //case VK_F9: return L"F9";
+    //case VK_F10: return L"F10";
+    //case VK_F11: return L"F11";
+    //case VK_F12: return L"F12";
+
+        // 方向键
+    case VK_UP: return L"↑";
+    case VK_DOWN: return L"↓";
+    case VK_LEFT: return L"←";
+    case VK_RIGHT: return L"→";
+
+        // 特殊键
+    case VK_SPACE: return L"空格";
+    case VK_TAB: return L"Tab";
+    case VK_RETURN: return L"Enter";  // 回车键
+    case VK_BACK: return L"Backspace";// 退格键
+//    case VK_DELETE: return L"Delete";
+    //case VK_INSERT: return L"Insert";
+    //case VK_HOME: return L"Home";
+    //case VK_END: return L"End";
+    //case VK_PRIOR: return L"PageUp";  // 上页
+    //case VK_NEXT: return L"PageDown"; // 下页
+
+        // 修饰键
+    case VK_SHIFT: return L"Shift";
+    case VK_LSHIFT: return L"左Shift";
+    case VK_RSHIFT: return L"右Shift";
+    case VK_CONTROL: return L"Ctrl";
+    case VK_LCONTROL: return L"左Ctrl";
+    case VK_RCONTROL: return L"右Ctrl";
+    case VK_MENU: return L"Alt";      // Alt键（VK_MENU是Alt的虚拟键码）
+    case VK_LMENU: return L"左Alt";
+    case VK_RMENU: return L"右Alt";
+    case VK_CAPITAL: return L"CapsLock"; // 大小写锁定
+
+        // 数字键（主键盘）
+    case '0': return L"0";
+    case '1': return L"1";
+    case '2': return L"2";
+    case '3': return L"3";
+    case '4': return L"4";
+    case '5': return L"5";
+    case '6': return L"6";
+    case '7': return L"7";
+    case '8': return L"8";
+    case '9': return L"9";
+
+        // 字母键（A-Z）
+    case 'A': return L"A";
+    case 'B': return L"B";
+    case 'C': return L"C";
+    case 'D': return L"D";
+    case 'E': return L"E";
+    case 'F': return L"F";
+    case 'G': return L"G";
+    case 'H': return L"H";
+    case 'I': return L"I";
+    case 'J': return L"J";
+    case 'K': return L"K";
+    case 'L': return L"L";
+    case 'M': return L"M";
+    case 'N': return L"N";
+    case 'O': return L"O";
+    case 'P': return L"P";
+    case 'Q': return L"Q";
+    case 'R': return L"R";
+    case 'S': return L"S";
+    case 'T': return L"T";
+    case 'U': return L"U";
+    case 'V': return L"V";
+    case 'W': return L"W";
+    case 'X': return L"X";
+    case 'Y': return L"Y";
+    case 'Z': return L"Z";
+
+        // 小键盘键（如果需要支持）
+    case VK_NUMPAD0: return L"小键盘0";
+    case VK_NUMPAD1: return L"小键盘1";
+    case VK_NUMPAD2: return L"小键盘2";
+    case VK_NUMPAD3: return L"小键盘3";
+    case VK_NUMPAD4: return L"小键盘4";
+    case VK_NUMPAD5: return L"小键盘5";
+    case VK_NUMPAD6: return L"小键盘6";
+    case VK_NUMPAD7: return L"小键盘7";
+    case VK_NUMPAD8: return L"小键盘8";
+    case VK_NUMPAD9: return L"小键盘9";
+    case VK_MULTIPLY: return L"小键盘*";
+    case VK_ADD: return L"小键盘+";
+    case VK_SUBTRACT: return L"小键盘-";
+    case VK_DIVIDE: return L"小键盘/";
+    case VK_DECIMAL: return L"小键盘.";
+
+        // 其他未覆盖的键，显示虚拟键码（方便调试）
+    default: {
+        static wchar_t buf[20];
+        swprintf_s(buf, L"未知(0x%X)", vk); // 显示十六进制VK值，如“未知(0x41)”
+        return buf;
+    }
+    }
+}
+
+// 检测键位冲突
+bool isKeyConflict(int newVk, int exclude) {
+    // 排除当前正在修改的键位，检查其他键是否已占用newVk键
+    if (exclude != 1 && keyset.keyrotate == newVk) return true;
+    if (exclude != 2 && keyset.keydown == newVk) return true;
+    if (exclude != 3 && keyset.keyleft == newVk) return true;
+    if (exclude != 4 && keyset.keyright == newVk) return true;
+    if (exclude != 5 && keyset.keydrop == newVk) return true;
+    if (exclude != 6 && keyset.keyquit == newVk) return true;
+    if (exclude != 7 && keyset.keypause == newVk) return true;
+    return false;
+}
+
+
+
+
+
+
 
 //游戏菜单界面
 void Menusq() {
     cleardevice();       //清屏
-    int selected = 0;   // 当前选中项的判断值 （0:开始, 1:退出, 2:设置）
+    int selected = 0;   // 当前选中项的判断值 
     settextstyle(25, 0, L"宋体");
-    // 菜单选项文本（按顺序存储，方便循环绘制）
-    const wchar_t* menuItems[3] = { L"开始游戏", L"退出游戏", L"设置" };
+    const wchar_t* menuItems[3] = { L"开始游戏", L"退出游戏", L"设置" };  // 菜单选项文本（按顺序存储，方便循环绘制）
     int itemY[3] = { WIN_HEIGHT/2-20, WIN_HEIGHT/2+20, WIN_HEIGHT/2+60 }; // 每个选项的Y坐标
-
+    if (msg.message == WM_KEYUP) { Sleep(100); }    //防止返回游戏菜单连触发
     while (true) {
+        setbkmode(OPAQUE);          // 开启不透明背景  
         settextcolor(BROWN);    //字体颜色
         settextstyle(35, 0, L"宋体");
         outtextxy(WIN_WIDTH/2-100, WIN_HEIGHT/2-100,L"俄罗斯方块");
 
         for (int i = 0; i < 3; i++) {
 
-            settextcolor(WHITE); // 未选中文字为
-            outtextxy(WIN_WIDTH / 2 - 100, itemY[i], menuItems[i]);//通过i找到要渲染文字的坐标
+            settextcolor(WHITE); // 未选中的文字为白色
+            outtextxy(WIN_WIDTH / 2-100, itemY[i], menuItems[i]); //通过i找到要渲染文字的坐标
         }
         //绘制当前选中项的边框和高亮文字
-        settextcolor(YELLOW);   // 选中文字为黄色
+        settextcolor(YELLOW);   // 选中的文字为黄色
         drawTextBorder(WIN_WIDTH / 2 - 100, itemY[selected], menuItems[selected], RED, BLACK);
         outtextxy(WIN_WIDTH / 2 - 100, itemY[selected], menuItems[selected]);
-
-        //处理按键输入
-        if (GetAsyncKeyState(VK_UP) & 0x8000) { //上键处理
-            selected = (selected - 1 + 3) % 3; // 循环上移（0→2）
-            Sleep(100); // 防止连跳
-        }
-        else if (GetAsyncKeyState(VK_DOWN) & 0x8000) {  //下键处理
-            selected = (selected + 1) % 3; // 循环下移（2→0）
-            Sleep(100);
-        }
-        else if (GetAsyncKeyState(VK_RETURN) & 0x8000) {    //回车选择处理
-            switch (selected) {
-            case 0:     initGame(); // 初始化游戏数据（生成初始方块、清空地图、初始化分数和时间）   
-                return; // 开始游戏
-            case 1:
-                exit(0); // 退出
-            case 2:
-                Setting();
-                cleardevice();  //清屏
-                break;
-            }
-            //while (GetAsyncKeyState(VK_RETURN) & 0x8000)
-            //{
-            //    Sleep(10);
-            //}  //按键连触发的终止处理，防止多次触发
-        }
         FlushBatchDraw();   //渲染缓冲画面
-        Sleep(16);  //降低刷新频率
-     
+
+        //处理按键输入（0:开始, 1:退出, 2:设置）
+        if (peekmessage(&msg, EX_KEY))
+        {
+            if (msg.message == WM_KEYDOWN)
+            {
+                if(msg.vkcode == VK_UP) //上键处理
+                    selected = (selected - 1 + 3) % 3; // 循环上移（0→2）
+                else if(msg.vkcode == VK_DOWN)  //下键处理
+                    selected = (selected + 1 + 3) % 3; // 循环下移（2→0）
+                else if(msg.vkcode == VK_RETURN)    //回车处理_选项
+                    switch (selected) {
+                    case 0:// 开始游戏
+                        initGame(); // 初始化游戏数据（生成初始方块、清空地图、初始化分数和时间）   
+                        return; 
+                    case 1:// 退出
+                        exit(0); 
+                    case 2://设置
+                        Setting();  //调用设置方法
+                        cleardevice();  //清屏
+                        break;
+                    }
+            }
+            else if (msg.message == WM_KEYUP) { Sleep(100); }
+        }
+        Sleep(20);  //防止高刷新
     }
 }
 
@@ -618,46 +877,75 @@ void SpeedChoice()
     settextstyle(25, 0, L"宋体");
     // 菜单选项文本（按顺序存储，方便循环绘制）
     const wchar_t* menuItems[4] = { L"变速", L"慢速", L"中等", L"快速" };
-    int itemY[4] = { WIN_HEIGHT / 2 - 20, WIN_HEIGHT / 2 + 40, WIN_HEIGHT / 2 + 80 ,WIN_HEIGHT / 2 + 100 }; // 每个选项的Y坐标
+    int itemY[4] = { WIN_HEIGHT / 2 - 20, WIN_HEIGHT / 2 + 20, WIN_HEIGHT / 2 + 60 ,WIN_HEIGHT / 2 + 100 }; // 每个选项的Y坐标
     while (1) {
-        // 1. 绘制所有菜单选项（未选中状态）
+        //绘制所有菜单选项（未选中状态）
         for (int i = 0; i < 4; i++) {
 
             settextcolor(WHITE); // 未选中文字为
             outtextxy(WIN_WIDTH / 2 - 100, itemY[i], menuItems[i]);//通过i找到要渲染文字的坐标
         }
-        // 2. 绘制当前选中项的边框和高亮文字
+        //绘制当前选中项的边框和高亮文字
         settextcolor(YELLOW); // 选中文字为黄色
         drawTextBorder(WIN_WIDTH / 2 - 100, itemY[selected], menuItems[selected], RED, BLACK);
         outtextxy(WIN_WIDTH / 2 - 100, itemY[selected], menuItems[selected]);
-
-        // 3. 处理按键输入
-        if (GetAsyncKeyState(VK_UP) & 0x8000) {
-            selected = (selected - 1 + 3) % 4; // 循环上移（0→2）
-            Sleep(150); // 防止连跳
-        }
-        else if (GetAsyncKeyState(VK_DOWN) & 0x8000) {
-            selected = (selected + 1) % 4; // 循环下移（2→0）
-            Sleep(150);
-        }
-        else if (GetAsyncKeyState(VK_RETURN) & 0x8000) {
-            switch (selected) {
-            case 0:
-                iscore = 0;
-                return; // 开始游戏
-            case 1:
-                iscore = 1;
-                return; // 退出
-            case 2:
-                iscore = 2;
-                return; // 进入设置后返回菜单需清屏
-            case 3:
-                iscore = 3;
-                return;
-            }
-        }
-
         FlushBatchDraw();
+
+        if (peekmessage(&msg, EX_KEY))
+        {
+            if (msg.message == WM_KEYDOWN)
+            {
+                if (msg.vkcode == VK_UP) //上键处理
+                    selected = (selected - 1 + 4) % 4;  // 循环上移
+                else if (msg.vkcode == VK_DOWN)  //下键处理
+                    selected = (selected + 1 + 4) % 4; // 循环下移
+                else if (msg.vkcode == VK_RETURN)  //回车处理_选项
+                        switch (selected) 
+                        {
+                            case 0:
+                                iscore = 0;
+                                return; // 开始游戏
+                            case 1:
+                                iscore = 1;
+                                return; // 退出
+                            case 2:
+                                iscore = 2;
+                                return; // 进入设置后返回菜单需清屏
+                            case 3:
+                                iscore = 3;
+                                return;
+                        }
+            }
+            else if (msg.message == WM_KEYUP) { Sleep(100); }
+        }
+
+
+        ////处理按键输入
+        //if (GetAsyncKeyState(VK_UP) & 0x8000) {
+        //    selected = (selected - 1 + 3) % 4; // 循环上移（0→2）
+        //    Sleep(150); // 防止连跳
+        //}
+        //else if (GetAsyncKeyState(VK_DOWN) & 0x8000) {
+        //    selected = (selected + 1) % 4; // 循环下移（2→0）
+        //    Sleep(150);
+        //}
+        //else if (GetAsyncKeyState(VK_RETURN) & 0x8000) {
+        //    switch (selected) {
+        //    case 0:
+        //        iscore = 0;
+        //        return; // 开始游戏
+        //    case 1:
+        //        iscore = 1;
+        //        return; // 退出
+        //    case 2:
+        //        iscore = 2;
+        //        return; // 进入设置后返回菜单需清屏
+        //    case 3:
+        //        iscore = 3;
+        //        return;
+        //    }
+        //}
+
         Sleep(10);
     }
 }
@@ -691,22 +979,22 @@ void Speed()
     }
 }
 
-
 //设置界面
 void Setting()
 {
+	if (msg.message == WM_KEYUP) { Sleep(100); }    //防止连跳
+    Sleep(100);
     int selected = 0; // 当前选中项判断值（0:退出, 1:设置速度, 2:设置键位，3：设置背景颜色，4：设置音乐）
     cleardevice();  //清屏
-    settextcolor(WHITE);    //字体颜色
-    settextstyle(20, 0, L"宋体");
-    outtextxy(WIN_WIDTH / 2 - 150, 0, L"设置");
+    settextcolor(BROWN);    //字体颜色
+    settextstyle(30, 0, L"宋体");
+    outtextxy(WIN_WIDTH/2-50,10, L"设置");
     settextstyle(25, 0, L"宋体");
     // 菜单选项文本（按顺序存储，方便循环绘制）
     const wchar_t* menuItems[5] = { L"退出", L"设置速度", L"设置键位" , L"设置背景色" , L"设置音乐" };
     int itemY[5] = { WIN_HEIGHT / 2 - 80 , WIN_HEIGHT / 2 - 40,WIN_HEIGHT / 2, WIN_HEIGHT / 2 + 40, WIN_HEIGHT / 2 + 80, }; // 每个选项的Y坐标
     while (true) {
-        setbkmode(OPAQUE);          // 开启透明背景  
-        setbkcolor(blockColor[colorcode]);
+        setbkmode(OPAQUE);          // 开启不透明背景  
         // 1. 绘制所有菜单选项（未选中状态）
         for (int i = 0; i < 5; i++) {
 
@@ -718,140 +1006,127 @@ void Setting()
         drawTextBorder(WIN_WIDTH / 2 - 100, itemY[selected], menuItems[selected], RED, BLACK);
         outtextxy(WIN_WIDTH / 2 - 100, itemY[selected], menuItems[selected]);
 
-        if (GetAsyncKeyState(VK_UP) & 0x8000) {
-            selected = (selected - 1 + 5) % 5; // 循环上移（0→2）
-            Sleep(150); // 防止连跳
-        }
-        else if (GetAsyncKeyState(VK_DOWN) & 0x8000) {
-            selected = (selected + 1) % 5; // 循环下移（2→0）
-            Sleep(150);
-        }
-
-        else if (GetAsyncKeyState(VK_RETURN) & 0x8000) {
-            switch (selected) {
-            case 0:
-                return; // 开始游戏
-            case 1:
-                SpeedChoice();
-                return; // 退出
-            case 2:
-                return;
-            case 3:
-                colormodle();
-                return;
-            case 4:
-                return;
-
+        if (peekmessage(&msg, EX_KEY))  //键盘的输入处理
+        {
+            if (msg.message == WM_KEYDOWN)
+            {
+                if (msg.vkcode == VK_UP) //上键处理
+                    selected = (selected - 1 + 5) % 5; // 循环上移
+                else if (msg.vkcode == VK_DOWN)  //下键处理
+                    selected = (selected + 1) % 5; // 循环下移
+                else if (msg.vkcode == VK_RETURN)    //回车处理_选项
+                    switch (selected) 
+                    {
+                        case 0:
+                            return;
+                        case 1:
+                            SpeedChoice();
+                            return;
+                        case 2:
+                            modifykey_UI();
+                            return;
+                        case 3:
+                            colormodle();
+                            return;
+                        case 4:
+                            return;
+                    }
             }
+            else if (msg.message == WM_KEYUP) { Sleep(100); }
         }
-
         FlushBatchDraw();   //渲染缓冲数据
         Sleep(16);          //降低刷新
     }
 }
 
-    void SetColor() {
-
-        initGame();
+//背景颜色设置
+void SetColor(){
         cleardevice();
-
         int selected = 0; // 当前选中项（0:黑色, 1:浅灰色, 2:咖啡色, 3:ihuf）
         settextstyle(15, 0, L"宋体");
         const wchar_t* menuItems[4] = { L"黑色", L"浅灰色", L"咖啡色", L"ihuf" };
         int itemY[4] = { WIN_HEIGHT / 2 - 40, WIN_HEIGHT / 2, WIN_HEIGHT / 2 + 40, WIN_HEIGHT / 2 + 80 };
 
-        while (1) {
+        while (true) {
             cleardevice();
             settextcolor(RED);
             settextstyle(20, 0, L"宋体");
             outtextxy(WIN_WIDTH / 2 - 150, WIN_HEIGHT / 2 - 100, L"选择颜色");
 
-                for (int i = 0; i < 4; i++) {
+                for (int i = 0; i < 4; i++) {   //绘制所有菜单选项（未选中的）
                 settextcolor(WHITE);
                 outtextxy(WIN_WIDTH / 2 - 100, itemY[i], menuItems[i]);
                 }
 
-                settextcolor(YELLOW);
+                settextcolor(YELLOW);   //选中的字体 黄色
                 drawTextBorder(WIN_WIDTH / 2 - 100, itemY[selected], menuItems[selected], RED, BLACK);
                 outtextxy(WIN_WIDTH / 2 - 100, itemY[selected], menuItems[selected]);
+                FlushBatchDraw();   //渲染缓冲内容
 
-                // 处理按键
-                if (GetAsyncKeyState(VK_UP) & 0x8000) {
-                selected = (selected - 1 + 4) % 4;
-                Sleep(150);
-                }
-                else if (GetAsyncKeyState(VK_DOWN) & 0x8000) {
-                selected = (selected + 1) % 4;
-                Sleep(150);
-                }
-                else if (GetAsyncKeyState(VK_RETURN) & 0x8000) {
-                    switch (selected) {
-                    case 0: colorcode = 0; return;
-                    case 1: colorcode = 9; return;
-                    case 2: colorcode = 10; return;
-                    case 3: colorcode = 11; return;
+                //处理按键输入
+                if (peekmessage(&msg, EX_KEY))  //键盘的输入处理
+                {
+                    if (msg.message == WM_KEYDOWN)
+                    {
+                        if (msg.vkcode == VK_UP) //上键处理
+                            selected = (selected - 1 + 4) % 4; // 循环上移
+                        else if (msg.vkcode == VK_DOWN)  //下键处理
+                            selected = (selected + 1 + 4) % 4; // 循环下移
+                        else if (msg.vkcode == VK_RETURN)    //回车处理_选项
+                            switch (selected) 
+                            {
+                                case 0: colorcode = 0; return;
+                                case 1: colorcode = 9; return;
+                                case 2: colorcode = 10; return;
+                                case 3: colorcode = 11; return;
+                            }
                     }
-                    Sleep(150);
-                   }
-
-            FlushBatchDraw();
-            Sleep(10);
+                    else if (msg.message == WM_KEYUP) { Sleep(100); }
+                }
         }
     }
-        
-    
 
+//颜色设置
 void colormodle()
 {
-    initGame();
-    cleardevice();
-    /*settextcolor(RED);
-    settextstyle(20, 0, L"宋体");
-    outtextxy(WIN_WIDTH / 2 - 150, WIN_HEIGHT / 2 - 100, L"俄罗斯方块");*/
-    int selected = 0; // 当前选中项（0:开始, 1:退出, 2:设置）
+    cleardevice();   //清屏
+    int selected = 0; // 当前选中项 0：设置背景色 、 1：设置方块色
     settextstyle(30, 0, L"宋体");
     // 菜单选项文本（按顺序存储，方便循环绘制）
     const wchar_t* menuItems[2] = { L"设置背景色", L"设置方块色" };
     int itemY[2] = { WIN_HEIGHT / 2 - 40, WIN_HEIGHT / 2 };
-    while (1) {
+    while (true) {
         settextcolor(WHITE);
         settextstyle(20, 0, L"宋体");
         outtextxy(WIN_WIDTH / 2 - 150, WIN_HEIGHT / 2 - 100, L"");
         // 1. 绘制所有菜单选项（未选中状态）
         for (int i = 0; i < 2; i++) {
-
-            settextcolor(WHITE); // 未选中文字为
-            outtextxy(WIN_WIDTH / 2 - 100, itemY[i], menuItems[i]);//通过i找到要渲染文字的坐标
+            settextcolor(WHITE); // 未选中文字为白
+            outtextxy(WIN_WIDTH / 2 - 100, itemY[i], menuItems[i]);//通过i找到要渲染文字的坐标，依次显示文字
         }
         // 2. 绘制当前选中项的边框和高亮文字
         settextcolor(YELLOW); // 选中文字为黄色
-        drawTextBorder(WIN_WIDTH / 2 - 100, itemY[selected], menuItems[selected], RED, BLACK);
+        drawTextBorder(WIN_WIDTH/2-100,itemY[selected],menuItems[selected],RED,BLACK);
         outtextxy(WIN_WIDTH / 2 - 100, itemY[selected], menuItems[selected]);
 
         // 3. 处理按键输入
-        if (_kbhit()) {
-            int key = _getch(); // 用int接收方向键的双字节扫描码
-            if (key == 0xE0) { // 方向键前缀码
-                key = _getch(); // 获取实际方向键扫描码
-                switch (key) {
-                case 0x48: // 上箭头
-                    selected = (selected - 1 + 2) % 2; // 循环上移（0→2）
-
-                    break;
-                case 0x50: // 下箭头
-                    selected = (selected + 1) % 2; // 循环下移（2→0）
-                    break;
-
-                }
+        if (peekmessage(&msg, EX_KEY))  //键盘的输入处理
+        {
+            if (msg.message == WM_KEYDOWN)
+            {
+                if (msg.vkcode == VK_UP) //上键处理
+                    selected = (selected - 1 + 2) % 2; // 循环上移
+                else if (msg.vkcode == VK_DOWN)  //下键处理
+                    selected = (selected + 1 + 2) % 2; // 循环下移
+                else if (msg.vkcode == VK_RETURN)    //回车处理_选项
+                    switch (selected)
+                    {
+                        case 0: SetColor(); return; // 开始游戏
+                        case 1:colorcode = 1; return;
+                    }
             }
-            else if (key == 13) {
-                switch (selected) {
-                case 0: SetColor(); return; // 开始游戏
-                case 1:colorcode = 1; return;
-                }
-            }
+            else if (msg.message == WM_KEYUP) { Sleep(100); }
         }
-
         FlushBatchDraw();
         Sleep(10);
     }
